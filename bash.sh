@@ -1,341 +1,355 @@
 #!/bin/bash
 
-# Define the project name
-PROJECT_NAME="TrueProject_Professional"
+# 1. Create the directory
+echo "Setting up 'backend' folder..."
+mkdir -p backend
+cd backend
 
-echo "🚀 Starting Project Setup: $PROJECT_NAME..."
-
-# 1. Create Directory Structure
-mkdir -p "$PROJECT_NAME/data"
-mkdir -p "$PROJECT_NAME/src"
-echo "✅ Directories created."
-
-# 2. Create requirements.txt
-cat <<EOF > "$PROJECT_NAME/requirements.txt"
-psycopg2-binary
-faiss-cpu
-sentence-transformers
-numpy
-google-genai
-python-dotenv
-EOF
-echo "📄 requirements.txt created."
-
-# 3. Create .env (With placeholders)
-cat <<EOF > "$PROJECT_NAME/.env"
-# AWS RDS Credentials
+# 2. Create the .env file
+echo "Creating .env file..."
+cat <<EOF > .env
 DB_NAME=truedb
 DB_USER=postgres
-DB_PASSWORD=YOUR_DB_PASSWORD_HERE
+DB_PASSWORD=password
 DB_HOST=trueproject-db.c07cik8ugpex.us-east-1.rds.amazonaws.com
 DB_PORT=5432
-
-# Google Gemini API
-GEMINI_API_KEY=YOUR_GEMINI_API_KEY_HERE
 EOF
-echo "🔐 .env created (Please update your passwords!)."
 
-# 4. Create Source Code Files
+# 3. Create requirements.txt
+echo "Creating requirements.txt..."
+cat <<EOF > requirements.txt
+fastapi
+uvicorn
+pydantic
+psycopg2-binary
+python-dotenv
+EOF
 
-# src/__init__.py
-touch "$PROJECT_NAME/src/__init__.py"
-
-# src/config.py
-cat <<EOF > "$PROJECT_NAME/src/config.py"
+# 4. Create database.py (Updated: Does NOT touch 'projects' table)
+echo "Creating database.py..."
+cat <<EOF > database.py
 import os
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from fastapi import HTTPException
 from dotenv import load_dotenv
 
 load_dotenv()
 
-class Config:
-    # Database Config
-    DB_PARAMS = {
-        "dbname": os.getenv("DB_NAME", "truedb"),
-        "user": os.getenv("DB_USER", "postgres"),
-        "password": os.getenv("DB_PASSWORD"),
-        "host": os.getenv("DB_HOST"),
-        "port": os.getenv("DB_PORT", "5432")
-    }
-
-    # API Config
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-    
-    # Paths
-    BASE_DIR = os.getcwd()
-    DATA_DIR = os.path.join(BASE_DIR, "data")
-    INDEX_PATH = os.path.join(DATA_DIR, "project_vectors.index")
-    METADATA_PATH = os.path.join(DATA_DIR, "project_metadata.pkl")
-
-    # Models
-    EMBEDDING_MODEL = 'all-MiniLM-L6-v2'
-    LLM_MODEL = 'gemini-1.5-flash'
-EOF
-
-# src/database.py
-cat <<EOF > "$PROJECT_NAME/src/database.py"
-import psycopg2
-from src.config import Config
-
-class DatabaseHandler:
-    @staticmethod
-    def fetch_projects():
-        """Fetches (id, title, synopsis) from AWS RDS."""
-        print(f"📡 Connecting to Database at {Config.DB_PARAMS['host']}...")
-        
-        conn = None
-        try:
-            conn = psycopg2.connect(**Config.DB_PARAMS)
-            cur = conn.cursor()
-            
-            # Fetching data
-            query = "SELECT project_id, title, synopsis FROM projects"
-            cur.execute(query)
-            rows = cur.fetchall()
-            
-            print(f"✅ Successfully fetched {len(rows)} projects from RDS.")
-            return rows
-
-        except Exception as e:
-            print(f"❌ Database Error: {e}")
-            return []
-        
-        finally:
-            if conn:
-                conn.close()
-EOF
-
-# src/vector_engine.py
-cat <<EOF > "$PROJECT_NAME/src/vector_engine.py"
-import os
-import pickle
-import faiss
-import numpy as np
-from sentence_transformers import SentenceTransformer
-from src.config import Config
-
-class VectorEngine:
-    def __init__(self):
-        # Create data directory if it doesn't exist
-        if not os.path.exists(Config.DATA_DIR):
-            os.makedirs(Config.DATA_DIR)
-
-        print(f"🧠 Loading Embedding Model ({Config.EMBEDDING_MODEL})...")
-        self.model = SentenceTransformer(Config.EMBEDDING_MODEL)
-        self.index = None
-        self.metadata = []
-
-    def build_index(self, db_rows):
-        """Creates vectors from DB rows and saves them."""
-        if not db_rows:
-            print("⚠️ No data to index.")
-            return
-
-        print("⚙️  Vectorizing projects...")
-        texts = []
-        self.metadata = []
-
-        for pid, title, synopsis in db_rows:
-            clean_synopsis = synopsis if synopsis else ""
-            full_text = f"{title}: {clean_synopsis}"
-            
-            texts.append(full_text)
-            self.metadata.append({
-                "id": pid, 
-                "name": title, 
-                "synopsis": clean_synopsis
-            })
-
-        # Generate Embeddings
-        embeddings = self.model.encode(texts)
-        embeddings = np.array(embeddings).astype('float32')
-        
-        # Build FAISS Index
-        dimension = embeddings.shape[1]
-        self.index = faiss.IndexFlatL2(dimension)
-        self.index.add(embeddings)
-
-        # Save to disk
-        self._save()
-
-    def _save(self):
-        """Internal method to save index and metadata."""
-        print(f"💾 Saving index to {Config.DATA_DIR}...")
-        faiss.write_index(self.index, Config.INDEX_PATH)
-        with open(Config.METADATA_PATH, "wb") as f:
-            pickle.dump(self.metadata, f)
-        print("✅ Index saved successfully.")
-
-    def load_index(self):
-        """Loads the index from disk."""
-        if os.path.exists(Config.INDEX_PATH) and os.path.exists(Config.METADATA_PATH):
-            self.index = faiss.read_index(Config.INDEX_PATH)
-            with open(Config.METADATA_PATH, "rb") as f:
-                self.metadata = pickle.load(f)
-            return True
-        return False
-
-    def search(self, title, synopsis, top_k=3):
-        """Searches for similar projects."""
-        if self.index is None:
-            raise FileNotFoundError("Index not loaded. Run indexer first.")
-
-        query_text = f"{title}: {synopsis}"
-        query_vector = self.model.encode([query_text])
-        query_vector = np.array(query_vector).astype('float32')
-
-        distances, indices = self.index.search(query_vector, k=top_k)
-        
-        results = []
-        for i in range(top_k):
-            idx = indices[0][i]
-            if idx != -1 and idx < len(self.metadata):
-                match = self.metadata[idx]
-                results.append(match)
-        
-        return results
-EOF
-
-# src/llm_judge.py
-cat <<EOF > "$PROJECT_NAME/src/llm_judge.py"
-import os
-import time
-from google import genai
-from src.config import Config
-
-class GeminiJudge:
-    def __init__(self):
-        if not Config.GEMINI_API_KEY:
-            raise ValueError("GEMINI_API_KEY missing in .env file")
-        
-        self.client = genai.Client(api_key=Config.GEMINI_API_KEY)
-        self.model_name = Config.LLM_MODEL
-
-    def get_verdict(self, new_project, similar_projects):
-        """Sends data to Gemini for analysis."""
-        
-        # Format the evidence
-        evidence_text = ""
-        for i, proj in enumerate(similar_projects):
-            evidence_text += f"\n[EXISTING PROJECT #{i+1}]\n"
-            evidence_text += f"Title: {proj['name']}\n"
-            evidence_text += f"Synopsis: {proj['synopsis'][:500]}...\n"
-
-        # The Prompt
-        prompt = f"""
-        You are an expert Plagiarism Detection System for a University.
-        
-        === NEW STUDENT PROPOSAL ===
-        Title: {new_project['title']}
-        Synopsis: {new_project['synopsis']}
-
-        === EVIDENCE (TOP MATCHES FROM DATABASE) ===
-        {evidence_text}
-
-        === TASK ===
-        Compare the NEW PROPOSAL against the EVIDENCE.
-        1. Determine if the core idea is copied (even if rephrased).
-        2. Provide an "Originality Score" (0% = Copied, 100% = Unique).
-        3. Explain your reasoning briefly.
-
-        === OUTPUT FORMAT ===
-        Verdict: [Unique / Suspicious / Plagiarized]
-        Score: [0-100]%
-        Reasoning: [Your analysis]
-        """
-
-        try:
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=prompt
-            )
-            return response.text
-        except Exception as e:
-            return f"❌ Error contacting Gemini: {e}"
-EOF
-echo "📦 Source code files created."
-
-# 5. Create Execution Scripts
-
-# run_indexer.py
-cat <<EOF > "$PROJECT_NAME/run_indexer.py"
-from src.database import DatabaseHandler
-from src.vector_engine import VectorEngine
-
-def main():
-    print("--- 🚀 STARTING INDEXER ---")
-    
-    # 1. Fetch Data from AWS RDS
-    projects = DatabaseHandler.fetch_projects()
-    
-    if not projects:
-        print("⚠️ No projects found. Exiting.")
-        return
-
-    # 2. Build and Save Vector Index
-    engine = VectorEngine()
-    engine.build_index(projects)
-    
-    print("\n✅ INDEXING COMPLETE. You can now run 'run_checker.py'")
-
-if __name__ == "__main__":
-    main()
-EOF
-
-# run_checker.py
-cat <<EOF > "$PROJECT_NAME/run_checker.py"
-from src.vector_engine import VectorEngine
-from src.llm_judge import GeminiJudge
-
-def check_proposal(title, synopsis):
-    print(f"\n🔎 Analyzing Proposal: '{title}'...")
-
-    # 1. Initialize Engines
+def get_db_connection():
     try:
-        engine = VectorEngine()
-        if not engine.load_index():
-            print("❌ Error: Index files not found. Please run 'run_indexer.py' first.")
-            return
-        
-        judge = GeminiJudge()
+        conn = psycopg2.connect(
+            dbname=os.getenv("DB_NAME"),
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASSWORD"),
+            host=os.getenv("DB_HOST"),
+            port=os.getenv("DB_PORT"),
+            cursor_factory=RealDictCursor
+        )
+        return conn
     except Exception as e:
-        print(f"❌ Initialization Error: {e}")
-        return
+        print(f"Database connection failed: {e}")
+        raise HTTPException(status_code=500, detail="Database connection failed")
 
-    # 2. Vector Search
-    print("   ...Searching database for similarities...")
-    matches = engine.search(title, synopsis)
-    
-    print(f"\n--- 🤖 FOUND {len(matches)} POTENTIAL MATCHES ---")
-    for i, m in enumerate(matches):
-        print(f"   Match #{i+1}: {m['name']}")
+def init_db():
+    """Creates tables if they don't exist."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 1. Students Table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS students (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                usn TEXT UNIQUE NOT NULL,
+                year INTEGER NOT NULL,
+                sem INTEGER NOT NULL,
+                dept TEXT NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL
+            )
+        ''')
+        
+        # 2. Teachers Table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS teachers (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                dept TEXT NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL
+            )
+        ''')
 
-    # 3. AI Verdict
-    print("\n⚖️  Sending evidence to Gemini Judge...")
-    verdict = judge.get_verdict({"title": title, "synopsis": synopsis}, matches)
-    
-    print("\n" + "="*50)
-    print("📢 FINAL REPORT")
-    print("="*50)
-    print(verdict)
-    print("="*50)
+        # 3. Teams Table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS teams (
+                team_id SERIAL PRIMARY KEY,
+                team_name TEXT UNIQUE NOT NULL,
+                team_size INTEGER NOT NULL,
+                team_members JSONB NOT NULL
+            )
+        ''')
 
-if __name__ == "__main__":
-    # --- TEST INPUT ---
-    new_title = "Smart Traffic Control System"
-    new_synopsis = "A system that uses cameras and AI to change traffic lights based on vehicle density."
-    
-    check_proposal(new_title, new_synopsis)
+        # 4. Submitted Projects Table (New table for intake)
+        # Note: We are NOT creating or touching a table named 'projects' here.
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS submitted_projects (
+                project_id SERIAL PRIMARY KEY,
+                team_id INTEGER REFERENCES teams(team_id),
+                project_title TEXT NOT NULL,
+                project_synopsis TEXT NOT NULL,
+                status TEXT DEFAULT 'not approved'
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+        print("Database initialized (Ensured 'submitted_projects' exists; 'projects' untouched).")
+    except Exception as e:
+        print(f"Initialization error: {e}")
 EOF
-echo "🏃 Execution scripts created."
 
+# 5. Create auth.py (Unchanged)
+echo "Creating auth.py..."
+cat <<EOF > auth.py
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+import psycopg2
+from database import get_db_connection
+
+router = APIRouter()
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class StudentRegister(BaseModel):
+    name: str
+    usn: str
+    year: int
+    sem: int
+    dept: str
+    email: str
+    password: str
+
+class TeacherRegister(BaseModel):
+    name: str
+    email: str
+    dept: str
+    password: str
+
+@router.post("/register/student")
+def register_student(student: StudentRegister):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        query = "INSERT INTO students (name, usn, year, sem, dept, email, password) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id"
+        cursor.execute(query, (student.name, student.usn, student.year, student.sem, student.dept, student.email, student.password))
+        new_id = cursor.fetchone()['id']
+        conn.commit()
+        conn.close()
+        return {"message": "Student registered successfully", "id": new_id, "email": student.email}
+    except psycopg2.errors.UniqueViolation:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Student with this Email or USN already exists")
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/login/student")
+def login_student(creds: LoginRequest):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM students WHERE email = %s AND password = %s", (creds.email, creds.password))
+    user = cursor.fetchone()
+    conn.close()
+    if user:
+        return {"message": "Student login successful", "user_id": user['id'], "name": user['name'], "role": "student"}
+    else:
+        raise HTTPException(status_code=401, detail="Invalid student credentials")
+
+@router.post("/register/teacher")
+def register_teacher(teacher: TeacherRegister):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        query = "INSERT INTO teachers (name, dept, email, password) VALUES (%s, %s, %s, %s) RETURNING id"
+        cursor.execute(query, (teacher.name, teacher.dept, teacher.email, teacher.password))
+        new_id = cursor.fetchone()['id']
+        conn.commit()
+        conn.close()
+        return {"message": "Teacher registered successfully", "id": new_id, "email": teacher.email}
+    except psycopg2.errors.UniqueViolation:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Teacher with this Email already exists")
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/login/teacher")
+def login_teacher(creds: LoginRequest):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM teachers WHERE email = %s AND password = %s", (creds.email, creds.password))
+    user = cursor.fetchone()
+    conn.close()
+    if user:
+        return {"message": "Teacher login successful", "user_id": user['id'], "name": user['name'], "role": "teacher"}
+    else:
+        raise HTTPException(status_code=401, detail="Invalid teacher credentials")
+EOF
+
+# 6. Create users_data.py (Unchanged)
+echo "Creating users_data.py..."
+cat <<EOF > users_data.py
+from fastapi import APIRouter, HTTPException
+from database import get_db_connection
+
+router = APIRouter()
+
+@router.get("/user/{email}")
+def get_user_details(email: str):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM students WHERE email = %s", (email,))
+        student = cursor.fetchone()
+        if student:
+            if 'password' in student: del student['password']
+            student['role'] = 'student'
+            return student
+        
+        cursor.execute("SELECT * FROM teachers WHERE email = %s", (email,))
+        teacher = cursor.fetchone()
+        if teacher:
+            if 'password' in teacher: del teacher['password']
+            teacher['role'] = 'teacher'
+            return teacher
+
+        raise HTTPException(status_code=404, detail="User not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+EOF
+
+# 7. Create teams.py (Updated: Inserts into 'submitted_projects')
+echo "Creating teams.py..."
+cat <<EOF > teams.py
+import json
+import psycopg2
+from typing import List
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from database import get_db_connection
+
+router = APIRouter()
+
+# --- PYDANTIC MODELS ---
+
+class TeamMember(BaseModel):
+    name: str
+    usn: str
+    email: str
+    dept: str
+
+class TeamCreate(BaseModel):
+    team_name: str
+    team_size: int
+    team_members: List[TeamMember]
+    project_title: str
+    project_synopsis: str
+
+# --- ENDPOINT ---
+
+@router.post("/create-team")
+def create_team(team_data: TeamCreate):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # 1. Insert into TEAMS table
+        members_json = json.dumps([member.dict() for member in team_data.team_members])
+
+        cursor.execute("""
+            INSERT INTO teams (team_name, team_size, team_members)
+            VALUES (%s, %s, %s)
+            RETURNING team_id
+        """, (team_data.team_name, team_data.team_size, members_json))
+        
+        team_id = cursor.fetchone()['team_id']
+
+        # 2. Insert into SUBMITTED_PROJECTS table
+        cursor.execute("""
+            INSERT INTO submitted_projects (team_id, project_title, project_synopsis)
+            VALUES (%s, %s, %s)
+        """, (team_id, team_data.project_title, team_data.project_synopsis))
+
+        conn.commit()
+        
+        return {
+            "message": "Team created and Project submitted successfully",
+            "team_id": team_id,
+            "project_status": "not approved"
+        }
+
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail="Team Name already exists")
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+EOF
+
+# 8. Create main.py (Unchanged)
+echo "Creating main.py..."
+cat <<EOF > main.py
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from database import init_db
+
+# Import routers
+from auth import router as auth_router
+from users_data import router as users_router
+from teams import router as teams_router
+
+app = FastAPI()
+
+# --- CORS ---
+origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --- ROUTES ---
+app.include_router(auth_router)
+app.include_router(users_router)
+app.include_router(teams_router)
+
+# --- STARTUP ---
+@app.on_event("startup")
+def on_startup():
+    init_db()
+EOF
+
+# 9. Final Instructions
+echo "----------------------------------------------------"
+echo "Setup Complete!"
 echo ""
-echo "=========================================="
-echo "🎉 PROJECT SETUP COMPLETE!"
-echo "=========================================="
-echo "Next Steps:"
-echo "1. cd $PROJECT_NAME"
-echo "2. Open .env and add your AWS Password & Gemini API Key."
-echo "3. Run: pip install -r requirements.txt"
-echo "4. Run: python run_indexer.py (To build the DB)"
-echo "5. Run: python run_checker.py (To test it)"
-echo "=========================================="
+echo "To run the server:"
+echo "1. cd backend"
+echo "2. pip install -r requirements.txt"
+echo "3. uvicorn main:app --reload"
+echo "----------------------------------------------------"
