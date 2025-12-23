@@ -1,0 +1,6 @@
+psycopg2-binary
+faiss-cpu
+sentence-transformers
+numpy
+google-genai
+python-dotenv
