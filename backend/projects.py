@@ -1,11 +1,3 @@
-#!/bin/bash
-
-# 1. Enter backend directory
-cd backend
-
-# 2. Update projects.py to match your ACTUAL table structure
-echo "Updating projects.py to match 'projects' table..."
-cat <<EOF > projects.py
 from fastapi import APIRouter, HTTPException
 from database import get_db_connection
 
@@ -28,13 +20,3 @@ def get_all_projects():
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()
-EOF
-
-# 3. Final Instructions
-echo "----------------------------------------------------"
-echo "API Updated!"
-echo ""
-echo "1. Go to: http://127.0.0.1:8000/docs"
-echo "2. Open 'GET /projects', click 'Try it out' -> 'Execute'."
-echo "3. You should now see the Neural Adaptive Learning Companion project."
-echo "----------------------------------------------------"

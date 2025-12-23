@@ -7,8 +7,6 @@ from database import get_db_connection
 
 router = APIRouter()
 
-# --- PYDANTIC MODELS ---
-
 class TeamMember(BaseModel):
     name: str
     usn: str
@@ -22,15 +20,12 @@ class TeamCreate(BaseModel):
     project_title: str
     project_synopsis: str
 
-# --- ENDPOINT ---
-
 @router.post("/create-team")
 def create_team(team_data: TeamCreate):
     conn = get_db_connection()
     cursor = conn.cursor()
 
     try:
-        # 1. Insert into TEAMS table
         members_json = json.dumps([member.dict() for member in team_data.team_members])
 
         cursor.execute("""
@@ -41,7 +36,6 @@ def create_team(team_data: TeamCreate):
         
         team_id = cursor.fetchone()['team_id']
 
-        # 2. Insert into SUBMITTED_PROJECTS table
         cursor.execute("""
             INSERT INTO submitted_projects (team_id, project_title, project_synopsis)
             VALUES (%s, %s, %s)

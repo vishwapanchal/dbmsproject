@@ -62,8 +62,7 @@ def init_db():
             )
         ''')
 
-        # 4. Submitted Projects Table (New table for intake)
-        # Note: We are NOT creating or touching a table named 'projects' here.
+        # 4. Submitted Projects Table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS submitted_projects (
                 project_id SERIAL PRIMARY KEY,
@@ -76,6 +75,6 @@ def init_db():
         
         conn.commit()
         conn.close()
-        print("Database initialized (Ensured 'submitted_projects' exists; 'projects' untouched).")
+        print("Database initialized.")
     except Exception as e:
         print(f"Initialization error: {e}")

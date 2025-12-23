@@ -6,6 +6,7 @@ from database import init_db
 from auth import router as auth_router
 from users_data import router as users_router
 from teams import router as teams_router
+from projects import router as projects_router
 
 app = FastAPI()
 
@@ -27,6 +28,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(teams_router)
+app.include_router(projects_router)
 
 # --- STARTUP ---
 @app.on_event("startup")
