@@ -24,14 +24,25 @@ class TeacherRegister(BaseModel):
     dept: str
     password: str
 
+# --------------------------
+# STUDENT ROUTES
+# --------------------------
+
 @router.post("/register/student")
 def register_student(student: StudentRegister):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        query = "INSERT INTO students (name, usn, year, sem, dept, email, password) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id"
+        # UPDATED: Returns 'student_id' instead of 'id'
+        query = """
+        INSERT INTO students (name, usn, year, sem, dept, email, password) 
+        VALUES (%s, %s, %s, %s, %s, %s, %s) 
+        RETURNING student_id
+        """
         cursor.execute(query, (student.name, student.usn, student.year, student.sem, student.dept, student.email, student.password))
-        new_id = cursor.fetchone()['id']
+        
+        # UPDATED: Access 'student_id'
+        new_id = cursor.fetchone()['student_id']
         conn.commit()
         conn.close()
         return {"message": "Student registered successfully", "id": new_id, "email": student.email}
@@ -50,18 +61,26 @@ def login_student(creds: LoginRequest):
     user = cursor.fetchone()
     conn.close()
     if user:
-        return {"message": "Student login successful", "user_id": user['id'], "name": user['name'], "role": "student"}
+        # UPDATED: Access 'student_id'
+        return {"message": "Student login successful", "user_id": user['student_id'], "name": user['name'], "role": "student"}
     else:
         raise HTTPException(status_code=401, detail="Invalid student credentials")
+
+# --------------------------
+# TEACHER ROUTES
+# --------------------------
 
 @router.post("/register/teacher")
 def register_teacher(teacher: TeacherRegister):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        query = "INSERT INTO teachers (name, dept, email, password) VALUES (%s, %s, %s, %s) RETURNING id"
+        # UPDATED: Returns 'teacher_id' instead of 'id'
+        query = "INSERT INTO teachers (name, dept, email, password) VALUES (%s, %s, %s, %s) RETURNING teacher_id"
         cursor.execute(query, (teacher.name, teacher.dept, teacher.email, teacher.password))
-        new_id = cursor.fetchone()['id']
+        
+        # UPDATED: Access 'teacher_id'
+        new_id = cursor.fetchone()['teacher_id']
         conn.commit()
         conn.close()
         return {"message": "Teacher registered successfully", "id": new_id, "email": teacher.email}
@@ -80,6 +99,7 @@ def login_teacher(creds: LoginRequest):
     user = cursor.fetchone()
     conn.close()
     if user:
-        return {"message": "Teacher login successful", "user_id": user['id'], "name": user['name'], "role": "teacher"}
+        # UPDATED: Access 'teacher_id'
+        return {"message": "Teacher login successful", "user_id": user['teacher_id'], "name": user['name'], "role": "teacher"}
     else:
         raise HTTPException(status_code=401, detail="Invalid teacher credentials")
