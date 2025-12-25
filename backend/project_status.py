@@ -24,15 +24,19 @@ def update_project_status(data: ProjectStatusUpdate):
     cursor = conn.cursor()
     
     try:
-        # 1. Check if the project exists
-        check_query = "SELECT submitted_project_id FROM submitted_projects WHERE submitted_project_id = %s"
+        # 1. Check if the project exists AND fetch its details (title, synopsis)
+        check_query = """
+            SELECT submitted_project_id, project_title, project_synopsis 
+            FROM submitted_projects 
+            WHERE submitted_project_id = %s
+        """
         cursor.execute(check_query, (data.submitted_project_id,))
         project = cursor.fetchone()
 
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        # 2. Update the status
+        # 2. Update the status in the submitted_projects table
         update_query = """
             UPDATE submitted_projects
             SET status = %s
@@ -40,6 +44,18 @@ def update_project_status(data: ProjectStatusUpdate):
         """
         cursor.execute(update_query, (data.status, data.submitted_project_id))
         
+        # ---------------------------------------------------------
+        # 3. NEW LOGIC: If 'approved', push to 'projects' table
+        # ---------------------------------------------------------
+        if data.status == "approved":
+            # We insert the title and synopsis into the main projects table
+            # used for similarity checks.
+            insert_query = """
+                INSERT INTO projects (title, synopsis)
+                VALUES (%s, %s)
+            """
+            cursor.execute(insert_query, (project['project_title'], project['project_synopsis']))
+
         conn.commit()
         
         return {
