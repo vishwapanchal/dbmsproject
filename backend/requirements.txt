@@ -1,5 +1,9 @@
-fastapi
-uvicorn
-pydantic
 psycopg2-binary
+faiss-cpu
+sentence-transformers
+numpy
+google-genai
 python-dotenv
+openai
+markdown
+xhtml2pdf

@@ -13,8 +13,9 @@ class Config:
         "port": os.getenv("DB_PORT", "5432")
     }
 
-    # API Config
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    # API Config - OPENROUTER
+    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+    OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
     
     # Paths
     BASE_DIR = os.getcwd()
@@ -24,4 +25,13 @@ class Config:
 
     # Models
     EMBEDDING_MODEL = 'all-MiniLM-L6-v2'
-    LLM_MODEL = 'gemini-2.0-flash'
+    
+    # --- MODEL SELECTION (TRY THESE IF ONE FAILS) ---
+    # Option 1: DeepSeek R1 Distill Llama 70B (Free) - Best balance of reasoning/uptime
+    LLM_MODEL = 'mistralai/devstral-2512:free'
+    
+    # Option 2: DeepSeek R1 (Older free checkpoint) - Try if Option 1 fails
+    # LLM_MODEL = 'deepseek/deepseek-r1-0528:free'
+    
+    # Option 3: Gemini 2.0 Flash (Free) - Extremely fast & reliable backup
+    # LLM_MODEL = 'google/gemini-2.0-flash-exp:free'
