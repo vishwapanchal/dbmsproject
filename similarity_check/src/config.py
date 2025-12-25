@@ -1,9 +1,22 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
-
 class Config:
+    # --- PATH SETUP ---
+    # 1. Get the directory of THIS file (src/)
+    SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+    # 2. Go up one level to 'similarity_check/'
+    BASE_DIR = os.path.dirname(SRC_DIR)
+    # 3. Define path to .env file explicitly
+    ENV_PATH = os.path.join(BASE_DIR, '.env')
+    
+    # --- LOAD ENVIRONMENT VARIABLES ---
+    # This loads the vars from .env into Python's os.environ
+    if os.path.exists(ENV_PATH):
+        load_dotenv(ENV_PATH)
+    else:
+        print(f"⚠️ Warning: .env file not found at {ENV_PATH}")
+
     # Database Config
     DB_PARAMS = {
         "dbname": os.getenv("DB_NAME", "truedb"),
@@ -18,20 +31,19 @@ class Config:
     OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
     
     # Paths
-    BASE_DIR = os.getcwd()
     DATA_DIR = os.path.join(BASE_DIR, "data")
+    os.makedirs(DATA_DIR, exist_ok=True) 
+
     INDEX_PATH = os.path.join(DATA_DIR, "project_vectors.index")
     METADATA_PATH = os.path.join(DATA_DIR, "project_metadata.pkl")
 
     # Models
     EMBEDDING_MODEL = 'all-MiniLM-L6-v2'
-    
-    # --- MODEL SELECTION (TRY THESE IF ONE FAILS) ---
-    # Option 1: DeepSeek R1 Distill Llama 70B (Free) - Best balance of reasoning/uptime
-    LLM_MODEL = 'mistralai/devstral-2512:free'
-    
-    # Option 2: DeepSeek R1 (Older free checkpoint) - Try if Option 1 fails
-    # LLM_MODEL = 'deepseek/deepseek-r1-0528:free'
-    
-    # Option 3: Gemini 2.0 Flash (Free) - Extremely fast & reliable backup
-    # LLM_MODEL = 'google/gemini-2.0-flash-exp:free'
+    LLM_MODEL = 'xiaomi/mimo-v2-flash:free'
+
+# --- DEBUG CHECK ---
+if not Config.OPENROUTER_API_KEY:
+    print(f"❌ ERROR: Could not read OPENROUTER_API_KEY from {Config.ENV_PATH}")
+    print("Make sure your .env file has: OPENROUTER_API_KEY=sk-or-v1-...")
+else:
+    print(f"✅ Config Loaded. Key found in .env: {Config.OPENROUTER_API_KEY[:5]}...")

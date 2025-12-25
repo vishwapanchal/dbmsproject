@@ -93,6 +93,9 @@ def get_user_details(email: str):
         # ---------------------------------------------------------
         # 2. Check if user is a TEACHER
         # ---------------------------------------------------------
+        # ---------------------------------------------------------
+        # 2. Check if user is a TEACHER
+        # ---------------------------------------------------------
         cursor.execute("SELECT * FROM teachers WHERE email = %s", (email,))
         teacher_row = cursor.fetchone()
         
@@ -102,8 +105,7 @@ def get_user_details(email: str):
             teacher['role'] = 'teacher'
             
             # --- Fetch Mentored Projects, Team Details & Phases ---
-            # We join submitted_projects with teams (for members)
-            # AND project_phases (to get marks if approved)
+            # Added sp.similar_project_titles to the SELECT list
             query_mentored = """
                 SELECT 
                     sp.submitted_project_id, 
@@ -113,6 +115,7 @@ def get_user_details(email: str):
                     sp.status, 
                     sp.similarity_score, 
                     sp.similar_projects_id, 
+                    sp.similar_project_titles,
                     sp.similarity_description,
                     t.team_name, 
                     t.team_size, 
@@ -140,6 +143,7 @@ def get_user_details(email: str):
                     "status": row['status'],
                     "similarity_score": row['similarity_score'],
                     "similar_projects_id": row['similar_projects_id'],
+                    "similar_project_titles": row['similar_project_titles'], # Added here
                     "similarity_description": row['similarity_description'],
                     "team_details": {
                         "team_id": row['team_id'],

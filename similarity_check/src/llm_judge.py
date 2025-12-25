@@ -1,13 +1,13 @@
 import os
+import json
 from openai import OpenAI
 from src.config import Config
 
 class GeminiJudge:
     def __init__(self):
         if not Config.OPENROUTER_API_KEY:
-            raise ValueError("OPENROUTER_API_KEY missing in .env file")
+            raise ValueError("OPENROUTER_API_KEY missing. Check src/config.py pathing.")
         
-        # Initialize OpenAI client pointing to OpenRouter
         self.client = OpenAI(
             base_url=Config.OPENROUTER_BASE_URL,
             api_key=Config.OPENROUTER_API_KEY,
@@ -15,56 +15,44 @@ class GeminiJudge:
         self.model_name = Config.LLM_MODEL
 
     def get_verdict(self, new_project, similar_projects):
-        """Sends data to the LLM for deep conceptual analysis with Tabular Output."""
+        """Sends data to the LLM and returns a JSON string."""
         
-        # Format the evidence
         evidence_text = ""
         for i, proj in enumerate(similar_projects):
-            evidence_text += f"\n[MATCH #{i+1}]\n"
-            evidence_text += f"Title: {proj['name']}\n"
-            evidence_text += f"Similarity Score: {proj.get('similarity', 'N/A')}%\n"
-            evidence_text += f"Synopsis: {proj['synopsis']}\n"
+            evidence_text += f"\n[MATCH #{i+1}]\nTitle: {proj['name']}\nSynopsis: {proj['synopsis']}\n"
 
-        # --- REFINED PROMPT FOR TABULAR OUTPUT ---
+        # --- UPDATED PROMPT FOR JSON OUTPUT ---
         system_prompt = (
-            "You are an expert Senior Project Reviewer and Technical Architect for a University. "
-            "Your task is to detect plagiarism by comparing a NEW PROPOSAL against EXISTING PROJECTS. "
-            "Focus on architectural and conceptual overlaps, not just keywords."
+            "You are an expert Project Reviewer. "
+            "Analyze the plagiarism risk and return the result strictly as a JSON object."
         )
         
         user_prompt = f"""
-        === TASK ===
-        Compare the "NEW PROPOSAL" against the "EXISTING MATCHES" and generate a report with a COMPARISON TABLE.
+        Compare this NEW PROPOSAL against EXISTING MATCHES.
 
-        === NEW STUDENT PROPOSAL ===
+        === NEW PROPOSAL ===
         Title: {new_project['title']}
         Synopsis: {new_project['synopsis']}
 
-        === EXISTING MATCHES (Potential Duplicates) ===
+        === EXISTING MATCHES ===
         {evidence_text}
 
-        === REQUIRED OUTPUT FORMAT ===
-        Please strictly follow this structure:
-
-        ### 🧠 Conceptual Analysis
-        [Briefly summarize the core technical concept of the new proposal in 2-3 sentences. Identify the problem and the specific solution mechanism.]
-
-        ### 📊 Detailed Comparison Table
-        | Match Name | Similarity % | Shared Concepts (The "What") | Architectural Overlap (The "How") | Key Differences |
-        | :--- | :--- | :--- | :--- | :--- |
-        | [Match #1 Name] | [Score] | [e.g., Both use Face Rec for Attendance] | [e.g., Both use OpenCV + Flask] | [e.g., New project adds GPS geofencing] |
-        | [Match #2 Name] | [Score] | ... | ... | ... |
-        
-        *(If a column is not applicable or the match is irrelevant, state "None" or "Low relevance")*
-
-        ### ⚖️ Final Verdict
-        | Metric | Result |
-        | :--- | :--- |
-        | **Status** | **[Unique / Suspicious / Plagiarized]** |
-        | **Originality Score** | **[0-100]%** |
-        
-        **Reasoning:**
-        [Provide a final concluding paragraph justifying the score based on the table above.]
+        === OUTPUT FORMAT ===
+        Return ONLY a valid JSON object with this exact structure (no markdown formatting):
+        {{
+            "analysis": "Brief conceptual analysis of the new project.",
+            "comparison": [
+                {{
+                    "match_name": "Name of Match 1",
+                    "similarity_note": "How it is similar or different"
+                }}
+            ],
+            "verdict": {{
+                "status": "Unique" | "Suspicious" | "Plagiarized",
+                "score": 0 to 100,
+                "reasoning": "Final conclusion"
+            }}
+        }}
         """
 
         try:
@@ -74,12 +62,16 @@ class GeminiJudge:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=0.2, # Low temperature for precise formatting
-                extra_headers={
-                    "HTTP-Referer": "https://localhost:3000", 
-                    "X-Title": "TrueProject Checker"
-                }
+                response_format={"type": "json_object"}, # Hints to model to output JSON
+                extra_headers={"HTTP-Referer": "http://localhost:3000"}
             )
-            return response.choices[0].message.content
+            content = response.choices[0].message.content
+            # Ensure it's valid JSON (or return raw if parsing fails)
+            return content
+            
         except Exception as e:
-            return f"❌ Error contacting AI Judge: {e}"
+            # Return a JSON error structure so the DB insert doesn't fail
+            return json.dumps({
+                "error": f"AI Check Failed: {str(e)}",
+                "verdict": {"status": "Error", "score": 0}
+            })
